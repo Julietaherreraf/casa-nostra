@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Única cuenta que puede editar (tiene que coincidir con EDITOR en app.js).
+    function isEditor() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'julietaherreraf@gmail.com';
+    }
+
+    // Lectores: mails guardados en config/acceso.lectores (se manejan desde el botón "Acceso").
+    function isReader() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/config/acceso)
+        && request.auth.token.email.lower() in get(/databases/$(database)/documents/config/acceso).data.lectores;
+    }
+
+    function validReserva(d) {
+      return d.keys().hasOnly(['nombre','desde','hasta','adultos','ninos','origen','notas'])
+        && d.nombre is string && d.nombre.size() > 0 && d.nombre.size() <= 100
+        && d.desde is string && d.desde.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.hasta is string && d.hasta.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.hasta > d.desde
+        && d.origen in ['Booking','Directa','Airbnb']
+        && (d.adultos == null || (d.adultos is int && d.adultos >= 0 && d.adultos <= 30))
+        && (d.ninos == null || (d.ninos is int && d.ninos >= 0 && d.ninos <= 30))
+        && d.notas is string && d.notas.size() <= 500;
+    }
+
+    match /reservas/{id} {
+      allow read: if isEditor() || isReader();
+      allow create, update: if isEditor() && validReserva(request.resource.data);
+      allow delete: if isEditor();
+    }
+
+    match /config/acceso {
+      allow read: if isEditor();
+      allow write: if isEditor()
+        && request.resource.data.keys().hasOnly(['lectores'])
+        && request.resource.data.lectores is list
+        && request.resource.data.lectores.size() <= 20;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
