@@ -9,12 +9,27 @@ service cloud.firestore {
         && request.auth.token.email == 'julietaherreraf@gmail.com';
     }
 
-    // Lectores: mails guardados en config/acceso.lectores (se manejan desde el botón "Acceso").
+    function acceso() {
+      return get(/databases/$(database)/documents/config/acceso).data;
+    }
+    function hasAcceso() {
+      return exists(/databases/$(database)/documents/config/acceso);
+    }
+
+    // Ven la agenda: mails en config/acceso.lectores (se manejan desde el botón "Acceso").
     function isReader() {
       return request.auth != null
         && request.auth.token.email_verified == true
-        && exists(/databases/$(database)/documents/config/acceso)
-        && request.auth.token.email.lower() in get(/databases/$(database)/documents/config/acceso).data.lectores;
+        && hasAcceso()
+        && request.auth.token.email.lower() in acceso().get('lectores', []);
+    }
+
+    // Ven los datos de autorización (DNI) y envían el mensaje: config/acceso.autorizan.
+    function isAutoriza() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && hasAcceso()
+        && request.auth.token.email.lower() in acceso().get('autorizan', []);
     }
 
     function validReserva(d) {
@@ -35,12 +50,33 @@ service cloud.firestore {
       allow delete: if isEditor();
     }
 
+    // Datos autorización: un documento por reserva, mismo id que la reserva.
+    match /fichas/{id} {
+      allow read: if isEditor() || isAutoriza();
+      allow create, update: if isEditor()
+        && request.resource.data.keys().hasOnly(['personas','enmascarado'])
+        && request.resource.data.personas is list
+        && request.resource.data.personas.size() <= 30
+        && request.resource.data.enmascarado is bool;
+      allow delete: if isEditor();
+    }
+
     match /config/acceso {
       allow read: if isEditor();
       allow write: if isEditor()
-        && request.resource.data.keys().hasOnly(['lectores'])
+        && request.resource.data.keys().hasOnly(['lectores','autorizan'])
         && request.resource.data.lectores is list
-        && request.resource.data.lectores.size() <= 20;
+        && request.resource.data.lectores.size() <= 20
+        && request.resource.data.get('autorizan', []) is list
+        && request.resource.data.get('autorizan', []).size() <= 5;
+    }
+
+    match /config/firma {
+      allow read: if isEditor() || isAutoriza();
+      allow write: if isEditor()
+        && request.resource.data.keys().hasOnly(['nombre','dni'])
+        && request.resource.data.nombre is string && request.resource.data.nombre.size() <= 100
+        && request.resource.data.dni is string && request.resource.data.dni.matches('^[0-9]{7,8}$');
     }
 
     match /{document=**} {
