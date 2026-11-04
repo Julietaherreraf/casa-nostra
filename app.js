@@ -312,8 +312,9 @@ function stayHtml(r, isNext) {
   const d = pd(r.desde), n = days(r.desde, r.hasta), own = isOwner(r), direct = !own && r.origen !== "Booking", t = total(r);
   let h = '<article class="stay' + (isNext ? " next" : "") + (own ? " own" : "") + '">';
   h += '<div class="date" aria-hidden="true"><span class="d">' + d.getDate() + '</span><span class="m">' + MES[d.getMonth()] + '</span><span class="w">' + DOW[d.getDay()] + '</span></div>';
-  h += '<div class="card"><div class="head"><h3>' + (own ? "Van los propietarios" : esc(r.nombre)) + '</h3><div class="pills"><span class="pill' + (own ? " own" : direct ? " direct" : "") + '">' + esc(r.origen) + '</span><span class="pill when">' + relTxt(r.desde) + '</span></div></div>';
-  if (!own) h += '<div class="box"><div class="big"><span class="num">' + (t == null ? "?" : t) + '</span><span class="lbl">personas</span></div><div class="det">' + esc(peopleTxt(r)) + '</div></div>';
+  h += '<div class="card"><div class="head"><h3>' + esc(r.nombre) + '</h3><div class="pills"><span class="pill' + (own ? " own" : direct ? " direct" : "") + '">' + esc(r.origen) + '</span><span class="pill when">' + relTxt(r.desde) + '</span></div></div>';
+  if (own) h += '<p class="ownline">Van los propietarios.</p>';
+  else h += '<div class="box"><div class="big"><span class="num">' + (t == null ? "?" : t) + '</span><span class="lbl">personas</span></div><div class="det">' + esc(peopleTxt(r)) + '</div></div>';
   h += '<ul class="facts"><li>Llega <b>' + nice(r.desde) + '</b> · se va <b class="out">' + nice(r.hasta) + '</b> · ' + n + ' noche' + (n === 1 ? "" : "s") + '</li></ul>';
   if (r.notas) h += '<p class="notes">' + esc(r.notas) + '</p>';
   if (S.canFichas && !own) {
@@ -418,7 +419,7 @@ function formHtml() {
   let h = '<form class="form" id="form" novalidate><h2>' + (isNew ? "Nueva reserva" : "Editar reserva") + '</h2><div class="fgrid">';
   const own = isOwner(r);
   h += '<label class="f full">Tipo<select id="f-origen">' + ["Booking", "Directa", "Airbnb", "Propietarios"].map(o => '<option' + (r.origen === o ? " selected" : "") + '>' + o + '</option>').join("") + '</select></label>';
-  if (!own) h += '<label class="f full">Nombre del huésped<input type="text" id="f-nombre" maxlength="100" value="' + esc(r.nombre === "Propietarios" ? "" : r.nombre) + '" autocomplete="off"></label>';
+  h += '<label class="f full">' + (own ? "Quién va (ej.: Juli, mamá)" : "Nombre del huésped") + '<input type="text" id="f-nombre" maxlength="100" value="' + esc(r.nombre) + '" autocomplete="off"></label>';
   h += '<label class="f">Llega (check-in)<input type="date" id="f-desde" value="' + esc(r.desde) + '"></label>';
   h += '<label class="f">Se va (check-out)<input type="date" id="f-hasta" value="' + esc(r.hasta) + '"></label>';
   if (!own) {
@@ -579,17 +580,17 @@ function readForm() {
   const v = id => document.getElementById(id).value;
   const num = id => { const e = document.getElementById(id); if (!e) return null; const x = e.value.trim(); return x === "" ? null : Math.min(30, Math.max(0, parseInt(x, 10) || 0)); };
   Object.assign(S.editing, {
-    nombre: document.getElementById("f-nombre") ? v("f-nombre").trim() : "Propietarios", desde: v("f-desde"), hasta: v("f-hasta"),
+    nombre: v("f-nombre").trim(), desde: v("f-desde"), hasta: v("f-hasta"),
     adultos: num("f-adultos"), ninos: num("f-ninos"), origen: v("f-origen"), notas: v("f-notas").trim()
   });
-  if (isOwner(S.editing)) { S.editing.nombre = "Propietarios"; S.editing.adultos = null; S.editing.ninos = null; }
+  if (isOwner(S.editing)) { S.editing.adultos = null; S.editing.ninos = null; }
 }
 function validate(r) {
-  if (!r.nombre) return "Falta el nombre del huésped.";
+  if (!r.nombre) return isOwner(r) ? "Escribí quién va." : "Falta el nombre del huésped.";
   if (!isISODate(r.desde) || !isISODate(r.hasta)) return "Completá la fecha de llegada y la de salida.";
   if (r.hasta <= r.desde) return "La salida tiene que ser al menos un día después de la llegada.";
   const clash = S.reservas.find(x => x.id !== r.id && r.desde < x.hasta && x.desde < r.hasta);
-  if (clash) return "Se superpone con " + (isOwner(clash) ? "los propietarios" : clash.nombre) + " (" + nice(clash.desde) + " al " + nice(clash.hasta) + "). Revisá las fechas.";
+  if (clash) return "Se superpone con " + clash.nombre + " (" + nice(clash.desde) + " al " + nice(clash.hasta) + "). Revisá las fechas.";
   return "";
 }
 
