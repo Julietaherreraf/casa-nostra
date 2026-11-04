@@ -419,7 +419,7 @@ function formHtml() {
   let h = '<form class="form" id="form" novalidate><h2>' + (isNew ? "Nueva reserva" : "Editar reserva") + '</h2><div class="fgrid">';
   const own = isOwner(r);
   h += '<label class="f full">Tipo<select id="f-origen">' + ["Booking", "Directa", "Airbnb", "Propietarios"].map(o => '<option' + (r.origen === o ? " selected" : "") + '>' + o + '</option>').join("") + '</select></label>';
-  h += '<label class="f full">' + (own ? "Quién va (ej.: Juli, mamá)" : "Nombre del huésped") + '<input type="text" id="f-nombre" maxlength="100" value="' + esc(r.nombre) + '" autocomplete="off"></label>';
+  h += '<label class="f full">' + (own ? "Quién va" : "Nombre del huésped") + '<input type="text" id="f-nombre" maxlength="100" value="' + esc(r.nombre) + '" autocomplete="off"></label>';
   h += '<label class="f">Llega (check-in)<input type="date" id="f-desde" value="' + esc(r.desde) + '"></label>';
   h += '<label class="f">Se va (check-out)<input type="date" id="f-hasta" value="' + esc(r.hasta) + '"></label>';
   if (!own) {
