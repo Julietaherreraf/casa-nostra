@@ -5,11 +5,11 @@ Webapp estática (GitHub Pages) con Firebase Auth (Google) y Firestore.
 - **Juli** (`julietaherreraf@gmail.com`) ve y edita reservas, y maneja quién tiene acceso desde el botón **Acceso**.
 - **Lectores** (mails cargados en Acceso) solo pueden ver.
 - **Envía autorizaciones** (tilde en Acceso): además ve los *Datos autorización* (DNI) de cada reserva y manda el mensaje a portería por WhatsApp.
+- Cualquier otra cuenta ve "Todavía no tenés acceso".
 
 ## Datos autorización
 
 Cada reserva tiene un botón **Datos autorización**. Juli pega el listado de nombres y DNI tal como llega por WhatsApp; quien envía ve el mensaje armado (DNI tapados en pantalla, completos al enviar o copiar). La firma (nombre y DNI) se carga en **Acceso**. Cuando termina la estadía, los DNI se guardan enmascarados (`••.•••.123`) la próxima vez que Juli abre la app.
-- Cualquier otra cuenta ve "Todavía no tenés acceso".
 
 La seguridad la ponen las reglas de `firestore.rules`, no la interfaz. La `apiKey` de `app.js` es pública por diseño.
 
