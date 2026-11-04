@@ -88,6 +88,7 @@ function peopleTxt(r) {
   return t;
 }
 function relTxt(s) { const d = days(today(), s); if (d === 0) return "hoy"; if (d === 1) return "mañana"; if (d < 0) return "en curso"; return "en " + d + " días"; }
+function isOwner(r) { return r.origen === "Propietarios"; }
 function sorted() { return S.reservas.slice().sort((a, b) => a.desde < b.desde ? -1 : a.desde > b.desde ? 1 : 0); }
 function isDark() {
   const t = document.documentElement.getAttribute("data-theme");
@@ -301,21 +302,22 @@ function mainHtml() {
   if (S.mode === "mes") return h + monthHtml(list);
   const upcoming = list.filter(r => r.hasta >= today());
   h += '<section aria-labelledby="h-ag"><h2 id="h-ag">Próximas estadías</h2>';
-  h += '<div class="legend"><span><i class="dot" style="background:var(--lake)"></i>Booking</span><span><i class="dot" style="background:var(--reed)"></i>Directa</span><span><i class="dot" style="background:var(--clay)"></i>Salida</span></div>';
+  h += '<div class="legend"><span><i class="dot" style="background:var(--lake)"></i>Booking</span><span><i class="dot" style="background:var(--reed)"></i>Directa</span><span><i class="dot" style="background:var(--own)"></i>Propietarios</span><span><i class="dot" style="background:var(--clay)"></i>Salida</span></div>';
   if (!upcoming.length) h += '<div class="empty"><p>No hay estadías próximas.' + (S.isEditor ? ' Tocá “Agregar reserva” para sumar una.' : '') + '</p></div>';
   else { h += '<div class="agenda">'; upcoming.forEach((r, i) => { h += stayHtml(r, i === 0); }); h += '</div>'; }
   return h + '</section>';
 }
 
 function stayHtml(r, isNext) {
-  const d = pd(r.desde), n = days(r.desde, r.hasta), direct = r.origen !== "Booking", t = total(r);
-  let h = '<article class="stay' + (isNext ? " next" : "") + '">';
+  const d = pd(r.desde), n = days(r.desde, r.hasta), own = isOwner(r), direct = !own && r.origen !== "Booking", t = total(r);
+  let h = '<article class="stay' + (isNext ? " next" : "") + (own ? " own" : "") + '">';
   h += '<div class="date" aria-hidden="true"><span class="d">' + d.getDate() + '</span><span class="m">' + MES[d.getMonth()] + '</span><span class="w">' + DOW[d.getDay()] + '</span></div>';
-  h += '<div class="card"><div class="head"><h3>' + esc(r.nombre) + '</h3><div class="pills"><span class="pill' + (direct ? " direct" : "") + '">' + esc(r.origen) + '</span><span class="pill when">' + relTxt(r.desde) + '</span></div></div>';
-  h += '<div class="box"><div class="big"><span class="num">' + (t == null ? "?" : t) + '</span><span class="lbl">personas</span></div><div class="det">' + esc(peopleTxt(r)) + '</div></div>';
+  h += '<div class="card"><div class="head"><h3>' + esc(r.nombre) + '</h3><div class="pills"><span class="pill' + (own ? " own" : direct ? " direct" : "") + '">' + esc(r.origen) + '</span><span class="pill when">' + relTxt(r.desde) + '</span></div></div>';
+  if (own) h += '<p class="ownline">Van los propietarios.</p>';
+  else h += '<div class="box"><div class="big"><span class="num">' + (t == null ? "?" : t) + '</span><span class="lbl">personas</span></div><div class="det">' + esc(peopleTxt(r)) + '</div></div>';
   h += '<ul class="facts"><li>Llega <b>' + nice(r.desde) + '</b> · se va <b class="out">' + nice(r.hasta) + '</b> · ' + n + ' noche' + (n === 1 ? "" : "s") + '</li></ul>';
   if (r.notas) h += '<p class="notes">' + esc(r.notas) + '</p>';
-  if (S.canFichas) {
+  if (S.canFichas && !own) {
     const st = fichaState(r);
     h += '<button class="authbtn ' + st.cls + '" data-auth="' + esc(r.id) + '" aria-haspopup="dialog"><span class="l">' + EYE + 'Datos autorización</span><span class="st">' + esc(st.txt) + '</span></button>';
   }
@@ -397,13 +399,13 @@ function monthHtml(all) {
   for (let dd = 1; dd <= dim; dd++) {
     const s = iso(new Date(y, m, dd)); let occ = null, arr = null, dep = null;
     all.forEach(r => { if (r.desde <= s && s < r.hasta) occ = r; if (r.desde === s) arr = r; if (r.hasta === s) dep = r; });
-    const cls = "cell" + (occ ? " occ" : "") + (occ && occ.origen !== "Booking" ? " direct" : "") + (s === td ? " today" : "");
+    const cls = "cell" + (occ ? " occ" : "") + (occ && isOwner(occ) ? " own" : occ && occ.origen !== "Booking" ? " direct" : "") + (s === td ? " today" : "");
     let tags = "";
     if (dep) tags += '<span class="tag outtag">↑ ' + esc(first(dep.nombre)) + '</span>';
     if (arr) tags += '<span class="tag in">↓ ' + esc(first(arr.nombre)) + '</span>';
     h += '<div class="' + cls + '" title="' + esc(s + (occ ? ", ocupada por " + occ.nombre : ", libre")) + '"><span class="n">' + dd + '</span>' + tags + '</div>';
   }
-  h += '</div></div><div class="legend"><span>↓ llega</span><span>↑ se va</span><span><i class="dot" style="background:var(--lake-soft);border:1px solid var(--lake)"></i>noche ocupada</span></div>';
+  h += '</div></div><div class="legend"><span>↓ llega</span><span>↑ se va</span><span><i class="dot" style="background:var(--lake-soft);border:1px solid var(--lake)"></i>noche ocupada</span><span><i class="dot" style="background:var(--own-soft);border:1px solid var(--own)"></i>propietarios</span></div>';
   const ms = iso(new Date(y, m, 1)), me = iso(new Date(y, m + 1, 1));
   const inMonth = all.filter(r => r.desde < me && r.hasta >= ms);
   h += '<h2>Estadías de ' + MESL[m] + '</h2>';
@@ -415,12 +417,15 @@ function monthHtml(all) {
 function formHtml() {
   const r = S.editing, isNew = !r.id;
   let h = '<form class="form" id="form" novalidate><h2>' + (isNew ? "Nueva reserva" : "Editar reserva") + '</h2><div class="fgrid">';
-  h += '<label class="f full">Nombre del huésped<input type="text" id="f-nombre" maxlength="100" value="' + esc(r.nombre) + '" autocomplete="off"></label>';
+  const own = isOwner(r);
+  h += '<label class="f full">Tipo<select id="f-origen">' + ["Booking", "Directa", "Airbnb", "Propietarios"].map(o => '<option' + (r.origen === o ? " selected" : "") + '>' + o + '</option>').join("") + '</select></label>';
+  h += '<label class="f full">' + (own ? "Quién va (ej.: Juli, mamá)" : "Nombre del huésped") + '<input type="text" id="f-nombre" maxlength="100" value="' + esc(r.nombre) + '" autocomplete="off"></label>';
   h += '<label class="f">Llega (check-in)<input type="date" id="f-desde" value="' + esc(r.desde) + '"></label>';
   h += '<label class="f">Se va (check-out)<input type="date" id="f-hasta" value="' + esc(r.hasta) + '"></label>';
-  h += '<label class="f">Adultos<input type="number" inputmode="numeric" min="0" max="30" id="f-adultos" value="' + (r.adultos ?? "") + '"></label>';
-  h += '<label class="f">Niños<input type="number" inputmode="numeric" min="0" max="30" id="f-ninos" value="' + (r.ninos ?? "") + '"></label>';
-  h += '<label class="f full">Origen<select id="f-origen">' + ["Booking", "Directa", "Airbnb"].map(o => '<option' + (r.origen === o ? " selected" : "") + '>' + o + '</option>').join("") + '</select></label>';
+  if (!own) {
+    h += '<label class="f">Adultos<input type="number" inputmode="numeric" min="0" max="30" id="f-adultos" value="' + (r.adultos ?? "") + '"></label>';
+    h += '<label class="f">Niños<input type="number" inputmode="numeric" min="0" max="30" id="f-ninos" value="' + (r.ninos ?? "") + '"></label>';
+  }
   h += '<label class="f full">Notas (opcional)<textarea id="f-notas" maxlength="500" placeholder="Ej.: llegan tarde, traen mascota, piden cuna">' + esc(r.notas) + '</textarea></label>';
   h += '</div>' + (S.formErr ? '<p class="err" role="alert">' + esc(S.formErr) + '</p>' : "");
   h += '<div class="actions"><div class="r"><button type="submit" class="primary"' + (S.busy ? " disabled" : "") + '>Guardar</button><button type="button" id="cancel">Cancelar</button></div>';
@@ -492,6 +497,8 @@ function bind() {
       await b.commit();
     }, "Reserva borrada.").then(() => { S.editing = null; render(); }).catch(() => {});
   });
+  const fo = q("f-origen");
+  if (fo) fo.onchange = () => { readForm(); S.formErr = ""; render(); q("f-nombre")?.focus(); };
   const f = q("form");
   if (f) f.onsubmit = e => {
     e.preventDefault(); readForm();
@@ -571,14 +578,15 @@ function legacyCopy(ta) {
 
 function readForm() {
   const v = id => document.getElementById(id).value;
-  const num = id => { const x = v(id).trim(); return x === "" ? null : Math.min(30, Math.max(0, parseInt(x, 10) || 0)); };
+  const num = id => { const e = document.getElementById(id); if (!e) return null; const x = e.value.trim(); return x === "" ? null : Math.min(30, Math.max(0, parseInt(x, 10) || 0)); };
   Object.assign(S.editing, {
     nombre: v("f-nombre").trim(), desde: v("f-desde"), hasta: v("f-hasta"),
     adultos: num("f-adultos"), ninos: num("f-ninos"), origen: v("f-origen"), notas: v("f-notas").trim()
   });
+  if (isOwner(S.editing)) { S.editing.adultos = null; S.editing.ninos = null; }
 }
 function validate(r) {
-  if (!r.nombre) return "Falta el nombre del huésped.";
+  if (!r.nombre) return isOwner(r) ? "Escribí quién va." : "Falta el nombre del huésped.";
   if (!isISODate(r.desde) || !isISODate(r.hasta)) return "Completá la fecha de llegada y la de salida.";
   if (r.hasta <= r.desde) return "La salida tiene que ser al menos un día después de la llegada.";
   const clash = S.reservas.find(x => x.id !== r.id && r.desde < x.hasta && x.desde < r.hasta);
