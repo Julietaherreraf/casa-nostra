@@ -67,7 +67,7 @@ const S = {
   editing: null, confirmDel: false, formErr: "",
   showAccess: false, accessErr: "",
   // Ventana "Datos autorización"
-  authOpen: null, remOpen: null, draft: null, pasteText: "", reveal: false, toast: "", sheetErr: "",
+  authOpen: null, remOpen: null, remEdit: {}, draft: null, pasteText: "", reveal: false, toast: "", sheetErr: "",
   busy: false, msg: "", msgErr: false,
 };
 let unsubs = [];
@@ -146,6 +146,12 @@ function calUrl(r, x, fecha, hora) {
     (t != null ? "\nPersonas: " + t : "") + "\n\nAbrir la app: " + appUrl;
   const params = { action: "TEMPLATE", text: "Casa Nostra · " + x.titulo + " (" + first(r.nombre) + ")", dates: start + "/" + end, ctz: TZ, details };
   return "https://calendar.google.com/calendar/render?" + Object.entries(params).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
+}
+function remNote(r, fecha) {
+  if (!isISODate(fecha)) return "Elegí una fecha.";
+  if (fecha < today()) return "Esa fecha ya pasó.";
+  if (fecha >= r.desde) return "Ojo: es el día de llegada o después.";
+  return "Solo cambia este evento; la app no guarda el cambio.";
 }
 function remStatus(r) {
   const list = remsFor(r); if (!list.length) return null;
@@ -445,9 +451,18 @@ function remSheetHtml(r) {
     if (moved) h += '<span class="moved">Las fechas de la reserva cambiaron: agregalo de nuevo y borrá el evento viejo en Calendar.</span>';
     h += '</div>';
     if (!w.late) {
-      const fecha = w.past ? w.todayFecha : w.fecha, hora = w.past ? w.todayHora : w.hora;
-      const label = added ? "Agregado ✓" : w.past ? "Agregar para hoy " + hora : "Agregar a Calendar";
-      h += '<a class="btnlink calbtn' + (added ? " added" : "") + '" href="' + esc(calUrl(r, x, fecha, hora)) + '" target="_blank" rel="noopener" data-cal="' + esc(x.key) + '">' + esc(label) + '</a>';
+      const ed = S.remEdit[x.key];
+      const fecha = ed ? ed.fecha : w.past ? w.todayFecha : w.fecha, hora = ed ? ed.hora : w.past ? w.todayHora : w.hora;
+      const label = added ? "Agregado ✓" : ed ? "Agregar a Calendar" : w.past ? "Agregar para hoy " + hora : "Agregar a Calendar";
+      h += '<div class="rem-a"><a class="btnlink calbtn' + (added ? " added" : "") + '" href="' + esc(calUrl(r, x, fecha, hora)) + '" target="_blank" rel="noopener" data-cal="' + esc(x.key) + '">' + esc(label) + '</a>';
+      if (!ed) h += '<button class="ghost small" data-remedit="' + esc(x.key) + '">Cambiar fecha u hora</button>';
+      h += '</div>';
+      if (ed) {
+        h += '<div class="rem-edit"><label class="f">Fecha<input type="date" id="rd-' + esc(x.key) + '" data-remf="' + esc(x.key) + '" value="' + esc(fecha) + '"></label>';
+        h += '<label class="f">Hora<input type="time" id="rh-' + esc(x.key) + '" data-remh="' + esc(x.key) + '" value="' + esc(hora) + '" step="300"></label>';
+        h += '<button class="ghost small" data-remreset="' + esc(x.key) + '">Volver a ' + esc(w.past ? "hoy" : nice(w.fecha) + " " + w.hora) + '</button>';
+        h += '<p class="sub small-t rem-note" id="rn-' + esc(x.key) + '">' + esc(remNote(r, fecha)) + '</p></div>';
+      }
     }
     h += '</li>';
   });
@@ -533,7 +548,7 @@ function accessHtml() {
 }
 
 // ---------- eventos ----------
-function closeSheet() { S.remOpen = null; S.authOpen = null; S.draft = null; S.pasteText = ""; S.reveal = false; S.toast = ""; S.sheetErr = ""; render(); }
+function closeSheet() { S.remEdit = {}; S.remOpen = null; S.authOpen = null; S.draft = null; S.pasteText = ""; S.reveal = false; S.toast = ""; S.sheetErr = ""; render(); }
 function saveAcceso(lectores, autorizan, okMsg) {
   return run(() => setDoc(doc(db, "config", "acceso"), { lectores, autorizan: autorizan.filter(e => lectores.includes(e)) }), okMsg);
 }
@@ -624,8 +639,24 @@ function bind() {
   });
   on("closeauth", closeSheet);
   document.querySelectorAll("[data-rem]").forEach(b => b.onclick = () => {
-    S.remOpen = b.dataset.rem; S.authOpen = null; sheetJustOpened = true; render(); q("closeauth")?.focus();
+    S.remOpen = b.dataset.rem; S.remEdit = {}; S.authOpen = null; sheetJustOpened = true; render(); q("closeauth")?.focus();
   });
+  const remR = S.remOpen && S.reservas.find(x => x.id === S.remOpen);
+  document.querySelectorAll("[data-remedit]").forEach(b => b.onclick = () => {
+    const x = RECORDATORIOS.find(y => y.key === b.dataset.remedit), w = remWhen(remR, x);
+    S.remEdit[x.key] = { fecha: w.past ? w.todayFecha : w.fecha, hora: w.past ? w.todayHora : w.hora };
+    render(); q("rd-" + x.key)?.focus();
+  });
+  document.querySelectorAll("[data-remreset]").forEach(b => b.onclick = () => { delete S.remEdit[b.dataset.remreset]; render(); });
+  // Al cambiar fecha u hora se actualiza el enlace sin redibujar (para no perder el foco del campo).
+  const updRem = key => {
+    const x = RECORDATORIOS.find(y => y.key === key), f = q("rd-" + key).value, hr = q("rh-" + key).value;
+    S.remEdit[key] = { fecha: f, hora: hr };
+    const a = document.querySelector('[data-cal="' + key + '"]'), ok = isISODate(f) && /^\d{2}:\d{2}$/.test(hr);
+    if (a) { if (ok) { a.href = calUrl(remR, x, f, hr); a.removeAttribute("aria-disabled"); } else { a.removeAttribute("href"); a.setAttribute("aria-disabled", "true"); } }
+    const n = q("rn-" + key); if (n) n.textContent = ok ? remNote(remR, f) : "Completá fecha y hora.";
+  };
+  document.querySelectorAll("[data-remf],[data-remh]").forEach(i => i.oninput = () => updRem(i.dataset.remf || i.dataset.remh));
   document.querySelectorAll("[data-cal]").forEach(a => a.onclick = () => {
     const r = S.reservas.find(x => x.id === S.remOpen), x = RECORDATORIOS.find(y => y.key === a.dataset.cal);
     if (r && x) { markRem(r, x); setTimeout(render, 300); } // deja que el enlace se abra primero

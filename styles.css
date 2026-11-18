@@ -198,3 +198,8 @@ tr.bad td.dni{color:var(--clay);font-weight:700}
 .rem .moved{font-size:.88rem;color:var(--warn);font-weight:700}
 .calbtn{background:var(--lake);color:var(--surface)}
 .calbtn.added{background:transparent;color:var(--reed);border:1px solid var(--reed)}
+.rem-a{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.rem-edit{flex:1 1 100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:end}
+.rem-edit .rem-note,.rem-edit button{grid-column:1/-1;justify-self:start}
+.rem-edit input{font:inherit;border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:var(--bg);color:var(--ink);width:100%;min-width:0}
+.calbtn[aria-disabled="true"]{opacity:.5;pointer-events:none}
