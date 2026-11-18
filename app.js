@@ -38,6 +38,15 @@ const RESERVAS_INICIALES = [
   { nombre: "Verónica Delpozzi", desde: "2027-01-22", hasta: "2027-01-29", adultos: 4, ninos: 0, origen: "Booking", notas: "" }
 ];
 
+// Recordatorios para Google Calendar (se calculan desde la fecha de llegada).
+// who: "editor" = solo Juli; "autoriza" = Juli y quien envía autorizaciones.
+const RECORDATORIOS = [
+  { key: "dni", titulo: "Pedir DNI al huésped", dias: 7, hora: "10:00", who: "editor" },
+  { key: "aut", titulo: "Enviar autorización a portería", dias: 2, hora: "10:00", who: "autoriza" },
+  { key: "checkin", titulo: "Mandar instrucciones de check-in", dias: 1, hora: "10:00", who: "editor" },
+];
+const TZ = "America/Argentina/Buenos_Aires";
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -58,7 +67,7 @@ const S = {
   editing: null, confirmDel: false, formErr: "",
   showAccess: false, accessErr: "",
   // Ventana "Datos autorización"
-  authOpen: null, draft: null, pasteText: "", reveal: false, toast: "", sheetErr: "",
+  authOpen: null, remOpen: null, draft: null, pasteText: "", reveal: false, toast: "", sheetErr: "",
   busy: false, msg: "", msgErr: false,
 };
 let unsubs = [];
@@ -102,6 +111,46 @@ function errText(e) {
   if (c.includes("popup-closed") || c.includes("cancelled-popup")) return "Se cerró la ventana de Google antes de terminar.";
   if (c.includes("unauthorized-domain")) return "Este dominio no está autorizado en Firebase (Authentication → Settings → Authorized domains).";
   return "Algo falló (" + (c || "error") + "). Probá de nuevo.";
+}
+
+// ---------- recordatorios ----------
+function addDays(isoDate, n) { const d = pd(isoDate); d.setDate(d.getDate() + n); return iso(d); }
+function remsFor(r) {
+  if (isOwner(r)) return [];
+  if (S.isEditor) return RECORDATORIOS;
+  if (S.canFichas) return RECORDATORIOS.filter(x => x.who === "autoriza");
+  return [];
+}
+function remKey(r, x) { return "cn-rem-" + r.id + "-" + x.key; }
+function remAdded(r, x) { try { return localStorage.getItem(remKey(r, x)); } catch (e) { return null; } }
+function markRem(r, x) { try { localStorage.setItem(remKey(r, x), r.desde); } catch (e) {} }
+function pad2(n) { return String(n).padStart(2, "0"); }
+// Cuándo cae el recordatorio. Si la fecha ya pasó, se propone hoy (a la hora fija o en la próxima hora en punto).
+function remWhen(r, x) {
+  const fecha = addDays(r.desde, -x.dias), td = today();
+  const now = new Date(), [hh, mm] = x.hora.split(":").map(Number);
+  const fixedLater = now.getHours() < hh || (now.getHours() === hh && now.getMinutes() < mm);
+  if (fecha > td || (fecha === td && fixedLater)) return { fecha, hora: x.hora, past: false };
+  if (r.desde <= td) return { fecha, hora: x.hora, past: true, late: true }; // la estadía ya empezó
+  const hora = fixedLater ? x.hora : pad2(Math.min(23, now.getHours() + 1)) + ":00";
+  return { fecha, hora, past: true, todayFecha: td, todayHora: hora };
+}
+function calUrl(r, x, fecha, hora) {
+  const [hh, mm] = hora.split(":").map(Number);
+  const start = fecha.replace(/-/g, "") + "T" + pad2(hh) + pad2(mm) + "00";
+  const endD = new Date(2000, 0, 1, hh, mm + 15);
+  const end = fecha.replace(/-/g, "") + "T" + pad2(endD.getHours()) + pad2(endD.getMinutes()) + "00";
+  const n = days(r.desde, r.hasta), t = total(r);
+  const appUrl = location.origin + location.pathname;
+  const details = "Reserva: " + r.nombre + "\nEstadía: " + nice(r.desde) + " al " + nice(r.hasta) + " (" + n + " noche" + (n === 1 ? "" : "s") + ")" +
+    (t != null ? "\nPersonas: " + t : "") + "\n\nAbrir la app: " + appUrl;
+  const params = { action: "TEMPLATE", text: "Casa Nostra · " + x.titulo + " (" + first(r.nombre) + ")", dates: start + "/" + end, ctz: TZ, details };
+  return "https://calendar.google.com/calendar/render?" + Object.entries(params).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
+}
+function remStatus(r) {
+  const list = remsFor(r); if (!list.length) return null;
+  const added = list.filter(x => remAdded(r, x) === r.desde).length;
+  return added === list.length ? { cls: "ok", txt: "Agendados ✓" } : { cls: "", txt: added + " de " + list.length };
 }
 
 // ---------- DNI ----------
@@ -180,7 +229,7 @@ getRedirectResult(auth).catch(e => { S.msg = errText(e); S.msgErr = true; render
 onAuthStateChanged(auth, user => {
   unsubs.forEach(u => u()); unsubs = [];
   clearTimeout(loadTimer);
-  Object.assign(S, { user, reservas: [], reservasLoaded: false, lectores: [], autorizan: [], fichas: {}, canFichas: false, firma: null, editing: null, showAccess: false, authOpen: null });
+  Object.assign(S, { user, reservas: [], reservasLoaded: false, lectores: [], autorizan: [], fichas: {}, canFichas: false, firma: null, editing: null, showAccess: false, authOpen: null, remOpen: null });
   if (!user) { S.phase = "login"; render(); return; }
   S.isEditor = (user.email || "").toLowerCase() === EDITOR;
   S.phase = "loading"; render();
@@ -238,6 +287,7 @@ async function run(fn, okMsg) {
 
 // ---------- vistas ----------
 const GOOGLE_SVG = '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
+const BELL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
 const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7c1.9 0 3.6-.6 5-1.5"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
 
@@ -278,8 +328,10 @@ function render() {
   const keepScroll = had ? had.querySelector(".sheet")?.scrollTop : 0;
   if (had) had.remove();
   const r = S.authOpen && S.reservas.find(x => x.id === S.authOpen);
-  if (r && S.canFichas && S.phase === "ready") {
-    document.body.insertAdjacentHTML("beforeend", sheetHtml(r));
+  const rr = S.remOpen && S.reservas.find(x => x.id === S.remOpen);
+  const sheet = S.phase !== "ready" ? "" : (r && S.canFichas) ? sheetHtml(r) : (rr && remsFor(rr).length) ? remSheetHtml(rr) : "";
+  if (sheet) {
+    document.body.insertAdjacentHTML("beforeend", sheet);
     sheetJustOpened = false;
     const sh = document.querySelector("#scrim .sheet"); if (sh && keepScroll) sh.scrollTop = keepScroll;
     document.body.classList.add("noscroll");
@@ -321,6 +373,8 @@ function stayHtml(r, isNext) {
     const st = fichaState(r);
     h += '<button class="authbtn ' + st.cls + '" data-auth="' + esc(r.id) + '" aria-haspopup="dialog"><span class="l">' + EYE + 'Datos autorización</span><span class="st">' + esc(st.txt) + '</span></button>';
   }
+  const rs = remStatus(r);
+  if (rs && r.hasta >= today()) h += '<button class="rembtn ' + rs.cls + '" data-rem="' + esc(r.id) + '" aria-haspopup="dialog"><span class="l">' + BELL + 'Recordatorios</span><span class="st">' + esc(rs.txt) + '</span></button>';
   if (S.isEditor && !S.editing) h += '<div><button class="ghost" data-edit="' + esc(r.id) + '">Editar reserva</button></div>';
   return h + '</div></article>';
 }
@@ -375,6 +429,30 @@ function sheetHtml(r) {
   } else if (!S.firma) {
     h += '<p class="note-box">Falta la firma del mensaje. Pedile a Juli que la cargue.</p>';
   } else h += messageBlock(r, f.personas);
+  return h + '</div></div>';
+}
+
+function remSheetHtml(r) {
+  let h = '<div class="scrim" id="scrim"><div class="sheet' + (sheetJustOpened ? " anim" : "") + '" role="dialog" aria-modal="true" aria-labelledby="sh-t"><span class="grab" aria-hidden="true"></span>';
+  h += '<div class="sh"><div><h2 id="sh-t">Recordatorios</h2><p class="sub">' + esc(r.nombre) + ' · llega ' + nice(r.desde) + '</p></div><button class="ghost small" id="closeauth">Cerrar</button></div>';
+  h += '<ul class="rems">';
+  remsFor(r).forEach(x => {
+    const w = remWhen(r, x), stored = remAdded(r, x), added = stored === r.desde, moved = stored && stored !== r.desde;
+    h += '<li class="rem' + (added ? " done" : "") + '"><div class="rem-t"><b>' + esc(x.titulo) + '</b>';
+    if (w.late) h += '<span class="sub">La estadía ya empezó.</span>';
+    else if (w.past) h += '<span class="sub">' + (w.fecha === today() ? "Era hoy a las " + x.hora : "Era el " + nice(w.fecha)) + '. Ya pasó.</span>';
+    else h += '<span class="when">' + nice(w.fecha) + ' · ' + w.hora + '</span>';
+    if (moved) h += '<span class="moved">Las fechas de la reserva cambiaron: agregalo de nuevo y borrá el evento viejo en Calendar.</span>';
+    h += '</div>';
+    if (!w.late) {
+      const fecha = w.past ? w.todayFecha : w.fecha, hora = w.past ? w.todayHora : w.hora;
+      const label = added ? "Agregado ✓" : w.past ? "Agregar para hoy " + hora : "Agregar a Calendar";
+      h += '<a class="btnlink calbtn' + (added ? " added" : "") + '" href="' + esc(calUrl(r, x, fecha, hora)) + '" target="_blank" rel="noopener" data-cal="' + esc(x.key) + '">' + esc(label) + '</a>';
+    }
+    h += '</li>';
+  });
+  h += '</ul>';
+  h += '<p class="sub small-t">Se abre Google Calendar con el evento armado: tocá <b>Guardar</b>. Se agrega en la cuenta de Google que esté abierta en Calendar. No incluye DNI.</p>';
   return h + '</div></div>';
 }
 
@@ -455,7 +533,7 @@ function accessHtml() {
 }
 
 // ---------- eventos ----------
-function closeSheet() { S.authOpen = null; S.draft = null; S.pasteText = ""; S.reveal = false; S.toast = ""; S.sheetErr = ""; render(); }
+function closeSheet() { S.remOpen = null; S.authOpen = null; S.draft = null; S.pasteText = ""; S.reveal = false; S.toast = ""; S.sheetErr = ""; render(); }
 function saveAcceso(lectores, autorizan, okMsg) {
   return run(() => setDoc(doc(db, "config", "acceso"), { lectores, autorizan: autorizan.filter(e => lectores.includes(e)) }), okMsg);
 }
@@ -545,6 +623,13 @@ function bind() {
     sheetJustOpened = true; render(); q("closeauth")?.focus();
   });
   on("closeauth", closeSheet);
+  document.querySelectorAll("[data-rem]").forEach(b => b.onclick = () => {
+    S.remOpen = b.dataset.rem; S.authOpen = null; sheetJustOpened = true; render(); q("closeauth")?.focus();
+  });
+  document.querySelectorAll("[data-cal]").forEach(a => a.onclick = () => {
+    const r = S.reservas.find(x => x.id === S.remOpen), x = RECORDATORIOS.find(y => y.key === a.dataset.cal);
+    if (r && x) { markRem(r, x); setTimeout(render, 300); } // deja que el enlace se abra primero
+  });
   const scrim = q("scrim");
   if (scrim) scrim.onclick = e => { if (e.target === scrim) closeSheet(); };
   on("reveal", () => { S.reveal = !S.reveal; render(); });
@@ -594,7 +679,7 @@ function validate(r) {
   return "";
 }
 
-document.addEventListener("keydown", e => { if (e.key === "Escape" && S.authOpen) closeSheet(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && (S.authOpen || S.remOpen)) closeSheet(); });
 // Si el celular cambia de claro a oscuro con la página abierta, actualiza el botón.
 if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => render());
 render();

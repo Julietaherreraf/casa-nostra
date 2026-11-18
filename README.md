@@ -13,6 +13,10 @@ Cada reserva tiene un botón **Datos autorización**. Juli pega el listado de no
 
 La seguridad la ponen las reglas de `firestore.rules`, no la interfaz. La `apiKey` de `app.js` es pública por diseño.
 
+## Recordatorios
+
+Cada reserva tiene un botón **Recordatorios** que abre Google Calendar con el evento armado (sin DNI): pedir DNI (7 días antes), enviar autorización (2 días antes, también lo ve quien envía) e instrucciones de check-in (1 día antes), todos a las 10:00. Se configuran en `RECORDATORIOS` en `app.js`. La marca de "agregado" queda guardada en cada dispositivo.
+
 ## Puesta en marcha (una sola vez)
 
 1. **Reglas:** Firebase → Firestore → pestaña *Rules* → pegar el contenido de `firestore.rules` → *Publish*.
